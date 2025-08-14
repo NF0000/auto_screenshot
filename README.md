@@ -20,7 +20,7 @@
 
 ## 必要条件
 
-- **OS**: Windows 10/11
+- **OS**: Windows 10/11 または macOS 10.14以上
 - **Python**: 3.7以上
 
 ## インストール
@@ -36,12 +36,26 @@ cd Auto_screenshot
 pip install -r requirements.txt
 ```
 
+### 3. macOS固有の設定
+
+macOSで実行する場合、以下の権限設定が必要です：
+
+1. **アクセシビリティ権限**:
+   - システム環境設定 → セキュリティとプライバシー → プライバシー → アクセシビリティ
+   - ターミナル（またはPythonを実行するアプリ）を追加
+
+2. **画面収録権限**:
+   - システム環境設定 → セキュリティとプライバシー → プライバシー → 画面収録
+   - ターミナル（またはPythonを実行するアプリ）を追加
+
 ### 依存パッケージ
 - `pyautogui` - スクリーンショットとマウス自動化
 - `Pillow` - 画像処理
 - `pynput` - キーボード入力処理
 - `reportlab` - PDF生成
-- `pywin32` - Windows固有機能
+- `pywin32` - Windows固有機能（Windows版のみ）
+- `pyobjc-framework-Cocoa` - macOS固有機能（macOS版のみ）
+- `pyobjc-framework-Quartz` - macOS高品質スクリーンショット（macOS版のみ）
 
 ## 使用方法
 
@@ -100,10 +114,11 @@ python main.py
 
 ## 注意事項
 
-- Windows専用アプリケーションです
+- Windows 10/11 および macOS 10.14以上で動作します
 - 高解像度での撮影は処理時間が長くなる場合があります
 - 撮影中は指定した範囲や位置を変更しないでください
 - 緊急停止が必要な場合は必ずEscapeキーを使用してください
+- macOSでは初回実行時にアクセシビリティ権限の許可が必要です
 
 ## 技術仕様
 

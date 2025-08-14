@@ -9,6 +9,10 @@ import io
 import os
 import platform
 
+# macOSでの動作改善のためpyautoguiの設定を調整
+pyautogui.FAILSAFE = False  # フェイルセーフを無効化（マウスを左上角に移動してもエラーにならない）
+pyautogui.PAUSE = 0.1  # 操作間隔を短縮
+
 class ImageEditorWindow(tk.Toplevel):
     def __init__(self, master, images, app_instance):
         super().__init__(master)
@@ -271,69 +275,38 @@ class Application(tk.Frame):
     def select_area(self):
         self.master.withdraw()
         self.area_selection_window = tk.Toplevel(self.master)
-        self.area_selection_window.attributes("-fullscreen", True)
-        self.area_selection_window.attributes("-alpha", 0.3)
+        
+        # プラットフォーム固有のフルスクリーン設定
+        if platform.system() == "Darwin":  # macOS
+            # macOSでは overrideredirect と geometry を使用
+            self.area_selection_window.overrideredirect(True)
+            screen_width = self.area_selection_window.winfo_screenwidth()
+            screen_height = self.area_selection_window.winfo_screenheight()
+            self.area_selection_window.geometry(f"{screen_width}x{screen_height}+0+0")
+            self.area_selection_window.attributes("-alpha", 0.3)
+            self.area_selection_window.attributes("-topmost", True)
+            self.area_selection_window.lift()
+        else:  # Windows
+            self.area_selection_window.attributes("-fullscreen", True)
+            self.area_selection_window.attributes("-alpha", 0.3)
+        
         self.area_selection_window.bind("<ButtonPress-1>", self.on_area_select_start)
         self.area_selection_window.bind("<B1-Motion>", self.on_area_select_drag)
         self.area_selection_window.bind("<ButtonRelease-1>", self.on_area_select_end)
-        self.area_canvas = tk.Canvas(self.area_selection_window, cursor="crosshair")
+        
+        # Escapeキーでキャンセル
+        self.area_selection_window.bind("<Escape>", self.cancel_area_selection)
+        self.area_selection_window.focus_set()
+        
+        self.area_canvas = tk.Canvas(self.area_selection_window, cursor="crosshair", highlightthickness=0)
         self.area_canvas.pack(fill=tk.BOTH, expand=True)
 
-        # 高解像度でフルスクリーンショットを取得
-        self.fullscreen_image = pyautogui.screenshot()
-        self.magnifier_window = tk.Toplevel(self.area_selection_window)
-        self.magnifier_window.overrideredirect(True)
-        self.magnifier_size = 200
-        self.magnifier_canvas = tk.Canvas(self.magnifier_window, width=self.magnifier_size, height=self.magnifier_size)
-        self.magnifier_canvas.pack()
-        self.track_mouse()
+    def cancel_area_selection(self, event=None):
+        """範囲選択をキャンセル"""
+        if hasattr(self, 'area_selection_window') and self.area_selection_window.winfo_exists():
+            self.area_selection_window.destroy()
+        self.master.deiconify()
 
-    def track_mouse(self):
-        if not self.area_selection_window.winfo_exists():
-             if hasattr(self, 'magnifier_window') and self.magnifier_window.winfo_exists():
-                self.magnifier_window.destroy()
-             return
-
-        x, y = self.area_selection_window.winfo_pointerxy()
-        x = max(0, min(x, self.fullscreen_image.width - 1))
-        y = max(0, min(y, self.fullscreen_image.height - 1))
-
-        # Smart positioning for the magnifier window
-        screen_width = self.master.winfo_screenwidth()
-        screen_height = self.master.winfo_screenheight()
-        offset = 20 
-        
-        # Adjust Y position
-        if y + self.magnifier_size + offset > screen_height:
-            magnifier_y = y - self.magnifier_size - offset
-        else:
-            magnifier_y = y + offset
-
-        # Adjust X position
-        if x + self.magnifier_size + offset > screen_width:
-            magnifier_x = x - self.magnifier_size - offset
-        else:
-            magnifier_x = x + offset
-
-        self.magnifier_window.geometry(f"+{magnifier_x}+{magnifier_y}")
-
-        size = 100
-        left = max(0, x - size // 2)
-        top = max(0, y - size // 2)
-        right = min(self.fullscreen_image.width, x + size // 2)
-        bottom = min(self.fullscreen_image.height, y + size // 2)
-
-        if left >= right or top >= bottom:
-            self.area_selection_window.after(50, self.track_mouse)
-            return
-
-        cropped_image = self.fullscreen_image.crop((left, top, right, bottom))
-        zoomed_image_pil = cropped_image.resize((self.magnifier_size, self.magnifier_size), Image.NEAREST)
-        self.magnifier_photo = ImageTk.PhotoImage(zoomed_image_pil)
-        self.magnifier_canvas.create_image(0, 0, anchor=tk.NW, image=self.magnifier_photo)
-        self.magnifier_canvas.create_line(self.magnifier_size/2, 0, self.magnifier_size/2, self.magnifier_size, fill='red', width=1)
-        self.magnifier_canvas.create_line(0, self.magnifier_size/2, self.magnifier_size, self.magnifier_size/2, fill='red', width=1)
-        self.area_selection_window.after(50, self.track_mouse)
 
     def on_area_select_start(self, event):
         self.area_start_x = event.x
@@ -346,8 +319,6 @@ class Application(tk.Frame):
         self.area_rect = self.area_canvas.create_rectangle(self.area_start_x, self.area_start_y, event.x, event.y, outline='red', width=2)
 
     def on_area_select_end(self, event):
-        if hasattr(self, 'magnifier_window') and self.magnifier_window.winfo_exists():
-            self.magnifier_window.destroy()
         self.area_end_x = event.x
         self.area_end_y = event.y
         self.area_selection_window.destroy()
@@ -401,11 +372,35 @@ class Application(tk.Frame):
     def set_click_position(self):
         self.master.withdraw()
         self.click_position_window = tk.Toplevel(self.master)
-        self.click_position_window.attributes("-fullscreen", True)
-        self.click_position_window.attributes("-alpha", 0.3)
+        
+        # プラットフォーム固有のフルスクリーン設定
+        if platform.system() == "Darwin":  # macOS
+            # macOSでは overrideredirect と geometry を使用
+            self.click_position_window.overrideredirect(True)
+            screen_width = self.click_position_window.winfo_screenwidth()
+            screen_height = self.click_position_window.winfo_screenheight()
+            self.click_position_window.geometry(f"{screen_width}x{screen_height}+0+0")
+            self.click_position_window.attributes("-alpha", 0.3)
+            self.click_position_window.attributes("-topmost", True)
+            self.click_position_window.lift()
+        else:  # Windows
+            self.click_position_window.attributes("-fullscreen", True)
+            self.click_position_window.attributes("-alpha", 0.3)
+        
         self.click_position_window.bind("<ButtonPress-1>", self.on_click_position_set)
-        self.click_position_canvas = tk.Canvas(self.click_position_window, cursor="crosshair")
+        
+        # Escapeキーでキャンセル
+        self.click_position_window.bind("<Escape>", self.cancel_click_position)
+        self.click_position_window.focus_set()
+        
+        self.click_position_canvas = tk.Canvas(self.click_position_window, cursor="crosshair", highlightthickness=0)
         self.click_position_canvas.pack(fill=tk.BOTH, expand=True)
+
+    def cancel_click_position(self, event=None):
+        """クリック位置設定をキャンセル"""
+        if hasattr(self, 'click_position_window') and self.click_position_window.winfo_exists():
+            self.click_position_window.destroy()
+        self.master.deiconify()
 
     def on_click_position_set(self, event):
         self.click_position = (event.x, event.y)
@@ -551,6 +546,45 @@ class Application(tk.Frame):
                 except Exception as e:
                     print(f"Windows API スクリーンショット取得エラー: {e}")
                     pass
+            
+            elif platform.system() == "Darwin":  # macOS
+                # macOS の場合、Quartz APIを使用した高解像度スクリーンショット
+                try:
+                    import Quartz
+                    from Cocoa import NSBitmapImageRep
+                    from PIL import Image
+                    
+                    # CGDisplayCreateImageForRect を使用してRetinaスケールに対応
+                    region = Quartz.CGRectMake(x, y, width, height)
+                    image_ref = Quartz.CGWindowListCreateImage(
+                        region,
+                        Quartz.kCGWindowListOptionOnScreenOnly,
+                        Quartz.kCGNullWindowID,
+                        Quartz.kCGWindowImageDefault
+                    )
+                    
+                    if image_ref:
+                        # CGImageをNSBitmapImageRepに変換
+                        bitmap_rep = NSBitmapImageRep.alloc().initWithCGImage_(image_ref)
+                        
+                        # PNG データを取得
+                        png_data = bitmap_rep.representationUsingType_properties_(
+                            1,  # NSBitmapImageFileTypePNG
+                            None
+                        )
+                        
+                        # PIL Image に変換
+                        img = Image.open(io.BytesIO(png_data.bytes()))
+                        
+                        print(f"macOS Quartz API高解像度スクリーンショット取得: {img.size}")
+                        return img
+                        
+                except ImportError:
+                    print("PyObjCが利用できません。pyautoguiを使用します。")
+                    pass
+                except Exception as e:
+                    print(f"macOS Quartz API スクリーンショット取得エラー: {e}")
+                    pass
         except:
             pass
         
@@ -573,7 +607,14 @@ class Application(tk.Frame):
         return screenshot
 
     def automation_thread(self):
-        max_pages = self.screenshot_count.get() + 1
+        max_pages = self.screenshot_count.get()
+        
+        # 最初にアプリケーションを前面に出すクリック（macOS対応）
+        if platform.system() == "Darwin":  # macOS
+            print("macOS: 最初にアプリケーション前面化クリックを実行")
+            self.perform_click(self.click_position, is_first_click=True)
+            time.sleep(1.0)  # アプリ前面化とページ読み込み待機
+        
         for page_count in range(1, max_pages + 1):
             if not self.is_running:
                 break
@@ -584,16 +625,106 @@ class Application(tk.Frame):
             # PNG形式で高品質を保持（ロスレス圧縮）
             self.images.append(screenshot)
             
-            display_page_count = max(0, page_count - 1)
-            self.master.after(0, self.page_count_label.config, {"text": f"撮影枚数: {display_page_count}/{self.screenshot_count.get()}"})
+            self.master.after(0, self.page_count_label.config, {"text": f"撮影枚数: {page_count}/{self.screenshot_count.get()}"})
 
             if page_count < max_pages:
-                wait = 1.0 if page_count == 1 else self.wait_time.get()
+                wait = self.wait_time.get()
                 time.sleep(wait)
                 if self.is_running:
-                    pyautogui.click(self.click_position)
+                    # 2ページ目以降は通常のクリック
+                    self.perform_click(self.click_position, is_first_click=False)
         
         self.master.after(0, self.open_editor)
+
+    def perform_click(self, position, is_first_click=False):
+        """プラットフォーム固有のクリック実行"""
+        if not position:
+            print("クリック位置が設定されていません")
+            return
+            
+        x, y = position
+        click_type = "最初のクリック（アプリ前面化用）" if is_first_click else "通常のクリック"
+        print(f"クリック実行開始: {click_type} - 座標({x}, {y}) - Platform: {platform.system()}")
+        
+        try:
+            if platform.system() == "Darwin":  # macOS
+                # macOSの場合、より確実なクリック方法を使用
+                try:
+                    # PyObjCを使用したクリック（より確実）
+                    import Quartz
+                    
+                    # マウスを指定位置に移動
+                    pyautogui.moveTo(x, y, duration=0.1)
+                    time.sleep(0.1)
+                    
+                    if is_first_click:
+                        # 最初のクリック: アプリケーションを前面に出すため2回クリック
+                        print("macOS: アプリケーション前面化のため2回クリック実行")
+                        for i in range(2):
+                            # Core Graphicsを使用してクリックイベントを生成
+                            click_event_down = Quartz.CGEventCreateMouseEvent(
+                                None, Quartz.kCGEventLeftMouseDown, (x, y), Quartz.kCGMouseButtonLeft
+                            )
+                            click_event_up = Quartz.CGEventCreateMouseEvent(
+                                None, Quartz.kCGEventLeftMouseUp, (x, y), Quartz.kCGMouseButtonLeft
+                            )
+                            
+                            # クリックイベントを送信
+                            Quartz.CGEventPost(Quartz.kCGHIDEventTap, click_event_down)
+                            time.sleep(0.01)
+                            Quartz.CGEventPost(Quartz.kCGHIDEventTap, click_event_up)
+                            
+                            if i == 0:  # 1回目のクリック後に少し待機
+                                time.sleep(0.3)
+                        
+                        # アプリ前面化後の安定化待機
+                        time.sleep(0.5)
+                        print("macOS: アプリケーション前面化完了")
+                    else:
+                        # 通常のクリック
+                        click_event_down = Quartz.CGEventCreateMouseEvent(
+                            None, Quartz.kCGEventLeftMouseDown, (x, y), Quartz.kCGMouseButtonLeft
+                        )
+                        click_event_up = Quartz.CGEventCreateMouseEvent(
+                            None, Quartz.kCGEventLeftMouseUp, (x, y), Quartz.kCGMouseButtonLeft
+                        )
+                        
+                        # クリックイベントを送信
+                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, click_event_down)
+                        time.sleep(0.01)
+                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, click_event_up)
+                    
+                    print("macOS Core Graphics APIでクリック実行完了")
+                    
+                except ImportError:
+                    print("PyObjC Quartzが利用できません。pyautoguiを使用します")
+                    # フォールバック: pyautoguiを使用
+                    if is_first_click:
+                        pyautogui.click(x, y)  # 1回目
+                        time.sleep(0.3)
+                        pyautogui.click(x, y)  # 2回目
+                        time.sleep(0.5)  # 安定化待機
+                        print("pyautogui: アプリケーション前面化のため2回クリック完了")
+                    else:
+                        pyautogui.click(x, y)
+                except Exception as e:
+                    print(f"macOS固有クリック実行エラー: {e}")
+                    # フォールバック: pyautoguiを使用
+                    if is_first_click:
+                        pyautogui.click(x, y)  # 1回目
+                        time.sleep(0.3)
+                        pyautogui.click(x, y)  # 2回目
+                        time.sleep(0.5)  # 安定化待機
+                        print("pyautogui(エラー時): アプリケーション前面化のため2回クリック完了")
+                    else:
+                        pyautogui.click(x, y)
+            else:
+                # Windows やその他のプラットフォーム
+                pyautogui.click(x, y)
+                print("pyautoguiでクリック実行完了")
+                
+        except Exception as e:
+            print(f"クリック実行エラー: {e}")
 
     def update_settings_display(self):
         self.settings_display.config(state=tk.NORMAL)
