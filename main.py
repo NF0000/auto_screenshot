@@ -442,7 +442,7 @@ class Application(tk.Frame):
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.status_label.config(text="撮影完了。画像編集中...")
-        editor = ImageEditorWindow(self.master, self.images[1:], self)
+        editor = ImageEditorWindow(self.master, self.images, self)
         editor.grab_set()
 
     def save_pdf(self, images_to_save):
@@ -609,122 +609,93 @@ class Application(tk.Frame):
     def automation_thread(self):
         max_pages = self.screenshot_count.get()
         
-        # 最初にアプリケーションを前面に出すクリック（macOS対応）
+        # macOSの場合、最初にアプリ前面化処理を行う
         if platform.system() == "Darwin":  # macOS
-            print("macOS: 最初にアプリケーション前面化クリックを実行")
-            self.perform_click(self.click_position, is_first_click=True)
-            time.sleep(1.0)  # アプリ前面化とページ読み込み待機
-        
-        for page_count in range(1, max_pages + 1):
-            if not self.is_running:
-                break
-
-            x1, y1, x2, y2 = self.screenshot_area
-            # 最高解像度でスクリーンショットを取得
-            screenshot = self.capture_high_quality_screenshot(x1, y1, x2 - x1, y2 - y1)
-            # PNG形式で高品質を保持（ロスレス圧縮）
-            self.images.append(screenshot)
+            print("macOS: アプリケーション前面化処理開始")
             
-            self.master.after(0, self.page_count_label.config, {"text": f"撮影枚数: {page_count}/{self.screenshot_count.get()}"})
+            # 1枚目をスクリーンショット
+            x1, y1, x2, y2 = self.screenshot_area
+            screenshot = self.capture_high_quality_screenshot(x1, y1, x2 - x1, y2 - y1)
+            self.images.append(screenshot)
+            self.master.after(0, self.page_count_label.config, {"text": f"撮影枚数: 1/{max_pages}"})
+            print("macOS: 1枚目スクリーンショット完了")
+            
+            # アプリ前面化のために画面をクリック（ページめくりしない位置）
+            # クリック位置を一時的に画面中央に変更してアプリを前面に出す
+            screen_width = self.master.winfo_screenwidth()
+            screen_height = self.master.winfo_screenheight()
+            temp_click_pos = (screen_width // 2, screen_height // 2)
+            
+            time.sleep(1.0)
+            self.perform_app_focus_click(temp_click_pos)
+            time.sleep(1.0)  # アプリ前面化待機
+            print("macOS: アプリケーション前面化完了")
+            
+            # 2枚目以降のループ
+            for page_count in range(2, max_pages + 1):
+                if not self.is_running:
+                    break
+                
+                # ページめくりクリック
+                self.perform_click(self.click_position, is_first_click=False)
+                time.sleep(self.wait_time.get())
+                
+                # スクリーンショット
+                screenshot = self.capture_high_quality_screenshot(x1, y1, x2 - x1, y2 - y1)
+                self.images.append(screenshot)
+                self.master.after(0, self.page_count_label.config, {"text": f"撮影枚数: {page_count}/{max_pages}"})
+        
+        else:  # Windows など
+            for page_count in range(1, max_pages + 1):
+                if not self.is_running:
+                    break
 
-            if page_count < max_pages:
-                wait = self.wait_time.get()
-                time.sleep(wait)
-                if self.is_running:
-                    # 2ページ目以降は通常のクリック
-                    self.perform_click(self.click_position, is_first_click=False)
+                x1, y1, x2, y2 = self.screenshot_area
+                # 最高解像度でスクリーンショットを取得
+                screenshot = self.capture_high_quality_screenshot(x1, y1, x2 - x1, y2 - y1)
+                # PNG形式で高品質を保持（ロスレス圧縮）
+                self.images.append(screenshot)
+                
+                self.master.after(0, self.page_count_label.config, {"text": f"撮影枚数: {page_count}/{max_pages}"})
+
+                if page_count < max_pages:
+                    wait = 1.0 if page_count == 1 else self.wait_time.get()
+                    time.sleep(wait)
+                    if self.is_running:
+                        self.perform_click(self.click_position, is_first_click=False)
         
         self.master.after(0, self.open_editor)
 
+    def perform_app_focus_click(self, position):
+        """macOS用アプリ前面化専用クリック（ページめくりしない）"""
+        if not position:
+            print("アプリ前面化クリック位置が設定されていません")
+            return
+            
+        x, y = position
+        print(f"macOS: アプリ前面化クリック実行 - 座標({x}, {y})")
+        
+        try:
+            # シンプルな1回クリックでアプリを前面に出す
+            pyautogui.click(x, y)
+            print("macOS: アプリ前面化クリック完了")
+        except Exception as e:
+            print(f"アプリ前面化クリックエラー: {e}")
+
     def perform_click(self, position, is_first_click=False):
-        """プラットフォーム固有のクリック実行"""
+        """ページめくり用クリック実行"""
         if not position:
             print("クリック位置が設定されていません")
             return
             
         x, y = position
-        click_type = "最初のクリック（アプリ前面化用）" if is_first_click else "通常のクリック"
-        print(f"クリック実行開始: {click_type} - 座標({x}, {y}) - Platform: {platform.system()}")
+        print(f"ページめくりクリック実行: 座標({x}, {y})")
         
         try:
-            if platform.system() == "Darwin":  # macOS
-                # macOSの場合、より確実なクリック方法を使用
-                try:
-                    # PyObjCを使用したクリック（より確実）
-                    import Quartz
-                    
-                    # マウスを指定位置に移動
-                    pyautogui.moveTo(x, y, duration=0.1)
-                    time.sleep(0.1)
-                    
-                    if is_first_click:
-                        # 最初のクリック: アプリケーションを前面に出すため2回クリック
-                        print("macOS: アプリケーション前面化のため2回クリック実行")
-                        for i in range(2):
-                            # Core Graphicsを使用してクリックイベントを生成
-                            click_event_down = Quartz.CGEventCreateMouseEvent(
-                                None, Quartz.kCGEventLeftMouseDown, (x, y), Quartz.kCGMouseButtonLeft
-                            )
-                            click_event_up = Quartz.CGEventCreateMouseEvent(
-                                None, Quartz.kCGEventLeftMouseUp, (x, y), Quartz.kCGMouseButtonLeft
-                            )
-                            
-                            # クリックイベントを送信
-                            Quartz.CGEventPost(Quartz.kCGHIDEventTap, click_event_down)
-                            time.sleep(0.01)
-                            Quartz.CGEventPost(Quartz.kCGHIDEventTap, click_event_up)
-                            
-                            if i == 0:  # 1回目のクリック後に少し待機
-                                time.sleep(0.3)
-                        
-                        # アプリ前面化後の安定化待機
-                        time.sleep(0.5)
-                        print("macOS: アプリケーション前面化完了")
-                    else:
-                        # 通常のクリック
-                        click_event_down = Quartz.CGEventCreateMouseEvent(
-                            None, Quartz.kCGEventLeftMouseDown, (x, y), Quartz.kCGMouseButtonLeft
-                        )
-                        click_event_up = Quartz.CGEventCreateMouseEvent(
-                            None, Quartz.kCGEventLeftMouseUp, (x, y), Quartz.kCGMouseButtonLeft
-                        )
-                        
-                        # クリックイベントを送信
-                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, click_event_down)
-                        time.sleep(0.01)
-                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, click_event_up)
-                    
-                    print("macOS Core Graphics APIでクリック実行完了")
-                    
-                except ImportError:
-                    print("PyObjC Quartzが利用できません。pyautoguiを使用します")
-                    # フォールバック: pyautoguiを使用
-                    if is_first_click:
-                        pyautogui.click(x, y)  # 1回目
-                        time.sleep(0.3)
-                        pyautogui.click(x, y)  # 2回目
-                        time.sleep(0.5)  # 安定化待機
-                        print("pyautogui: アプリケーション前面化のため2回クリック完了")
-                    else:
-                        pyautogui.click(x, y)
-                except Exception as e:
-                    print(f"macOS固有クリック実行エラー: {e}")
-                    # フォールバック: pyautoguiを使用
-                    if is_first_click:
-                        pyautogui.click(x, y)  # 1回目
-                        time.sleep(0.3)
-                        pyautogui.click(x, y)  # 2回目
-                        time.sleep(0.5)  # 安定化待機
-                        print("pyautogui(エラー時): アプリケーション前面化のため2回クリック完了")
-                    else:
-                        pyautogui.click(x, y)
-            else:
-                # Windows やその他のプラットフォーム
-                pyautogui.click(x, y)
-                print("pyautoguiでクリック実行完了")
-                
+            pyautogui.click(x, y)
+            print("ページめくりクリック完了")
         except Exception as e:
-            print(f"クリック実行エラー: {e}")
+            print(f"ページめくりクリックエラー: {e}")
 
     def update_settings_display(self):
         self.settings_display.config(state=tk.NORMAL)
